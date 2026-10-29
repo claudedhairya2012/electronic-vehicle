@@ -1,0 +1,2849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>L7-M Compact EV — Engineering CAD Viewer</title>
+<style>
+  :root {
+    --bg: #030508;
+    --bg-soft: #070b11;
+    --line: rgba(140, 170, 205, 0.14);
+    --line-strong: rgba(150, 185, 220, 0.26);
+    --text: #dbe6f2;
+    --text-dim: #7d8ea3;
+    --text-faint: #4f5f72;
+    --accent: #4fd1ff;
+    --accent-soft: rgba(79, 209, 255, 0.14);
+    --accent-line: rgba(79, 209, 255, 0.42);
+    --amber: #ffb454;
+    --green: #5ff0a8;
+    --glass: rgba(10, 16, 24, 0.72);
+    --glass-strong: rgba(8, 13, 20, 0.88);
+    --radius: 14px;
+    --mono: "SFMono-Regular", "JetBrains Mono", "Consolas", "Roboto Mono", monospace;
+    --sans: "Inter", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  #viewport {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+
+  canvas { display: block; }
+
+  /* ---------- Vignette + scanline overlay ---------- */
+  #ambient-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at 50% 42%, rgba(79, 209, 255, 0.055) 0%, rgba(0,0,0,0) 55%),
+      radial-gradient(ellipse at 50% 120%, rgba(79, 209, 255, 0.07) 0%, rgba(0,0,0,0) 60%),
+      radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.62) 100%);
+  }
+
+  #grain {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: repeating-linear-gradient(
+      0deg,
+      rgba(255,255,255,0.9) 0px,
+      rgba(255,255,255,0.9) 1px,
+      rgba(0,0,0,0) 1px,
+      rgba(0,0,0,0) 3px
+    );
+    mix-blend-mode: overlay;
+  }
+
+  /* ---------- Sidebar toggle ---------- */
+  #panel-toggle {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    z-index: 40;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 11px 16px 11px 14px;
+    font-family: var(--sans);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text);
+    background: var(--glass-strong);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    cursor: pointer;
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255,255,255,0.06);
+    transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+  }
+
+  #panel-toggle:hover {
+    border-color: var(--accent-line);
+    box-shadow: 0 12px 44px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(79,209,255,0.16), inset 0 1px 0 rgba(255,255,255,0.09);
+  }
+
+  #panel-toggle:active { transform: translateY(1px); }
+
+  #panel-toggle .glyph {
+    font-size: 13px;
+    line-height: 1;
+    color: var(--accent);
+    letter-spacing: 0;
+  }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    position: fixed;
+    top: 72px;
+    left: 18px;
+    bottom: 62px;
+    width: 322px;
+    z-index: 35;
+    display: flex;
+    flex-direction: column;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    backdrop-filter: blur(28px) saturate(150%);
+    -webkit-backdrop-filter: blur(28px) saturate(150%);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    overflow: hidden;
+    transition: transform 480ms cubic-bezier(0.16, 1, 0.3, 1), opacity 380ms ease;
+  }
+
+  #sidebar.collapsed {
+    transform: translateX(calc(-100% - 26px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #sidebar-inner {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px 16px 22px 16px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(79, 209, 255, 0.34) transparent;
+  }
+
+  #sidebar-inner::-webkit-scrollbar { width: 8px; }
+  #sidebar-inner::-webkit-scrollbar-track { background: transparent; }
+  #sidebar-inner::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(79,209,255,0.42), rgba(79,209,255,0.16));
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  #sidebar-inner::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(79,209,255,0.62), rgba(79,209,255,0.26));
+    background-clip: padding-box;
+  }
+
+  .brand {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border-radius: 8px;
+    border: 1px solid var(--accent-line);
+    background:
+      linear-gradient(140deg, rgba(79,209,255,0.24), rgba(79,209,255,0.03) 62%),
+      var(--bg-soft);
+    position: relative;
+    box-shadow: inset 0 0 14px rgba(79,209,255,0.16);
+  }
+
+  .brand-mark::before,
+  .brand-mark::after {
+    content: "";
+    position: absolute;
+    background: var(--accent);
+    opacity: 0.85;
+  }
+
+  .brand-mark::before {
+    left: 50%; top: 8px; bottom: 8px; width: 1px; transform: translateX(-0.5px);
+  }
+
+  .brand-mark::after {
+    top: 50%; left: 8px; right: 8px; height: 1px; transform: translateY(-0.5px);
+  }
+
+  .brand-text h1 {
+    margin: 0;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: #eef5fd;
+  }
+
+  .brand-text p {
+    margin: 4px 0 0 0;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .section { margin-bottom: 18px; }
+
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 9px 0;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--line-strong), rgba(0,0,0,0));
+  }
+
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 11px;
+    margin-bottom: 6px;
+    font-family: var(--sans);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.035em;
+    color: var(--text);
+    text-align: left;
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 140ms ease;
+  }
+
+  .btn:hover {
+    background: rgba(79, 209, 255, 0.075);
+    border-color: var(--accent-line);
+  }
+
+  .btn:active { transform: translateY(1px); }
+
+  .btn .tag {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    white-space: nowrap;
+    transition: color 180ms ease;
+  }
+
+  .btn.is-on {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: #f2fbff;
+    box-shadow: inset 0 0 0 1px rgba(79,209,255,0.1), 0 0 18px rgba(79,209,255,0.09);
+  }
+
+  .btn.is-on .tag { color: var(--accent); }
+
+  .btn.is-off { color: var(--text-dim); }
+
+  .btn.is-off .tag { color: var(--text-faint); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .grid-2 .btn { margin-bottom: 0; }
+
+  .swatches {
+    display: flex;
+    gap: 9px;
+    padding: 3px 1px 1px 1px;
+  }
+
+  .swatch {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 6px 16px rgba(0,0,0,0.5);
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  }
+
+  .swatch:hover { transform: translateY(-2px); }
+
+  .swatch.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(79,209,255,0.4), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+
+  .swatch span {
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    background: linear-gradient(150deg, rgba(255,255,255,0.34), rgba(255,255,255,0) 52%);
+    pointer-events: none;
+  }
+
+  /* ---------- Specs ---------- */
+  .spec-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+
+  .spec-cell {
+    padding: 9px 10px;
+    background: rgba(6, 10, 16, 0.86);
+  }
+
+  .spec-cell .k {
+    display: block;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 4px;
+  }
+
+  .spec-cell .v {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #e3eefa;
+  }
+
+  .spec-cell .v em {
+    font-style: normal;
+    color: var(--green);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+  }
+
+  .spec-note {
+    margin: 9px 0 0 0;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    line-height: 1.6;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+
+  /* ---------- Telemetry HUD ---------- */
+  #hud {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 30;
+    width: 234px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    backdrop-filter: blur(28px) saturate(150%);
+    -webkit-backdrop-filter: blur(28px) saturate(150%);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    overflow: hidden;
+  }
+
+  .hud-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 13px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.018);
+  }
+
+  .hud-head span:first-child {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.19em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .status-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--green);
+  }
+
+  .status-dot::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.28; }
+  }
+
+  .hud-body { padding: 13px; }
+
+  .speed-block { text-align: center; padding: 2px 0 12px 0; }
+
+  .speed-value {
+    font-family: var(--mono);
+    font-size: 46px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: #f4faff;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 34px rgba(79, 209, 255, 0.42);
+  }
+
+  .speed-unit {
+    display: block;
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .meter { margin-bottom: 12px; }
+
+  .meter-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 5px;
+  }
+
+  .meter-top .label {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .meter-top .num {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #e6f1fb;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bar {
+    position: relative;
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.075);
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #2aa9d8, #4fd1ff 55%, #8fe8ff);
+    box-shadow: 0 0 12px rgba(79, 209, 255, 0.55);
+    transition: width 240ms linear, background 300ms ease;
+  }
+
+  .bar-fill.warn { background: linear-gradient(90deg, #d88a2a, #ffb454); box-shadow: 0 0 12px rgba(255,180,84,0.5); }
+  .bar-fill.low { background: linear-gradient(90deg, #b93a3a, #ff6b6b); box-shadow: 0 0 12px rgba(255,107,107,0.5); }
+
+  .hud-foot {
+    display: flex;
+    justify-content: space-between;
+    padding: 9px 13px;
+    border-top: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.26);
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .hud-foot b { color: var(--text-dim); font-weight: 600; }
+
+  /* ---------- Footer legend ---------- */
+  #legend {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 9px 18px;
+    max-width: calc(100vw - 36px);
+    background: var(--glass-strong);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.66), inset 0 1px 0 rgba(255,255,255,0.055);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
+
+  #legend .key {
+    display: inline-block;
+    padding: 2px 6px;
+    margin-right: 5px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.045);
+    color: #cfe3f5;
+    font-size: 9px;
+  }
+
+  #legend .sep {
+    width: 1px;
+    height: 12px;
+    background: var(--line-strong);
+  }
+
+  /* ---------- Loading veil ---------- */
+  #loader {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: var(--bg);
+    transition: opacity 700ms ease;
+  }
+
+  #loader.hidden { opacity: 0; pointer-events: none; }
+
+  #loader .lbl {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  #loader .track {
+    width: 190px;
+    height: 2px;
+    background: rgba(255,255,255,0.09);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  #loader .track i {
+    display: block;
+    height: 100%;
+    width: 40%;
+    background: linear-gradient(90deg, rgba(79,209,255,0), #4fd1ff, rgba(79,209,255,0));
+    animation: sweep 1.15s ease-in-out infinite;
+  }
+
+  @keyframes sweep {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(320%); }
+  }
+
+  @media (max-width: 860px) {
+    #sidebar { width: 280px; top: 68px; bottom: 76px; }
+    #hud { width: 178px; top: 68px; right: 12px; }
+    .speed-value { font-size: 34px; }
+    #legend { gap: 9px; font-size: 8px; padding: 8px 12px; }
+    #legend .sep { display: none; }
+  }
+
+  @media (max-width: 560px) {
+    #hud { width: 150px; }
+    .hud-body { padding: 10px; }
+    #legend { flex-wrap: wrap; justify-content: center; border-radius: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="viewport"></div>
+<div id="ambient-overlay"></div>
+<div id="grain"></div>
+
+<button id="panel-toggle" type="button">
+  <span class="glyph">☰</span>
+  <span id="toggle-label">Toggle UI Panel</span>
+</button>
+
+<aside id="sidebar">
+  <div id="sidebar-inner">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-text">
+        <h1>L7-M Compact EV</h1>
+        <p>Engineering CAD Viewer</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <p class="section-label">Sub-System Isolation</p>
+      <button class="btn" data-isolate="assembly" type="button">
+        <span>Full Vehicle Assembly</span><span class="tag">All</span>
+      </button>
+      <button class="btn" data-isolate="cage" type="button">
+        <span>Spaceframe Roll Cage</span><span class="tag">Cage</span>
+      </button>
+      <button class="btn" data-isolate="powertrain" type="button">
+        <span>Motor &amp; Axles</span><span class="tag">Drive</span>
+      </button>
+      <button class="btn" data-isolate="battery" type="button">
+        <span>AIS-156 Battery &amp; BMS</span><span class="tag">Pack</span>
+      </button>
+      <button class="btn" data-isolate="cabin" type="button">
+        <span>Ergonomic Cabin</span><span class="tag">Interior</span>
+      </button>
+      <button class="btn" data-isolate="shell" type="button">
+        <span>Composite Shell</span><span class="tag">Body</span>
+      </button>
+    </div>
+
+    <div class="section">
+      <p class="section-label">Mechanisms</p>
+      <button class="btn" id="btn-explode" type="button">
+        <span>Explode Sub-Systems</span><span class="tag" id="tag-explode">Off</span>
+      </button>
+      <button class="btn" id="btn-doors" type="button">
+        <span>Slide Doors</span><span class="tag" id="tag-doors">Closed</span>
+      </button>
+      <button class="btn" id="btn-lights" type="button">
+        <span>LED Headlights</span><span class="tag" id="tag-lights">Off</span>
+      </button>
+      <button class="btn" id="btn-xray" type="button">
+        <span>X-Ray View</span><span class="tag" id="tag-xray">Off</span>
+      </button>
+      <div class="grid-2">
+        <button class="btn" id="btn-orbit" type="button">
+          <span>Auto Orbit</span><span class="tag" id="tag-orbit">Off</span>
+        </button>
+        <button class="btn" id="btn-reset" type="button">
+          <span>Reset View</span><span class="tag">Cam</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="section">
+      <p class="section-label">Camera Presets</p>
+      <button class="btn" data-cam="driver" type="button">
+        <span>Driver POV</span><span class="tag">P1</span>
+      </button>
+      <button class="btn" data-cam="top" type="button">
+        <span>Top Roof View</span><span class="tag">P2</span>
+      </button>
+      <button class="btn" data-cam="chassis" type="button">
+        <span>Under-Chassis Battery</span><span class="tag">P3</span>
+      </button>
+    </div>
+
+    <div class="section">
+      <p class="section-label">Composite Body Finish</p>
+      <div class="swatches" id="swatches">
+        <button class="swatch active" data-color="slate" type="button" title="Slate" style="background:#3b4149"><span></span></button>
+        <button class="swatch" data-color="blue" type="button" title="Blue" style="background:#1d4d7a"><span></span></button>
+        <button class="swatch" data-color="crimson" type="button" title="Crimson" style="background:#7a1f2a"><span></span></button>
+        <button class="swatch" data-color="amber" type="button" title="Amber" style="background:#a86b1c"><span></span></button>
+        <button class="swatch" data-color="white" type="button" title="White" style="background:#d7dde3"><span></span></button>
+      </div>
+    </div>
+
+    <div class="section" style="margin-bottom:0">
+      <p class="section-label">CMVR Legal &amp; Engineering</p>
+      <div class="spec-grid">
+        <div class="spec-cell"><span class="k">Category</span><span class="v">CMVR L7-M</span></div>
+        <div class="spec-cell"><span class="k">Seating</span><span class="v">1 + 3</span></div>
+        <div class="spec-cell"><span class="k">Kerb Weight</span><span class="v">408 kg <em>&lt;450</em></span></div>
+        <div class="spec-cell"><span class="k">Battery Mass</span><span class="v">88 kg</span></div>
+        <div class="spec-cell"><span class="k">Peak Power</span><span class="v">15 kW PMSM</span></div>
+        <div class="spec-cell"><span class="k">Range</span><span class="v">135 km LFP</span></div>
+        <div class="spec-cell"><span class="k">Cargo</span><span class="v">350 L Flat</span></div>
+        <div class="spec-cell"><span class="k">Top Speed</span><span class="v">70 km/h</span></div>
+      </div>
+      <p class="spec-note">Spaceframe: welded steel tubular · Footprint 2.7 m × 1.3 m<br />Rear PMSM 15 kW · AIS-156 LFP under-floor pack</p>
+    </div>
+  </div>
+</aside>
+
+<section id="hud">
+  <div class="hud-head">
+    <span>Vehicle Telemetry</span>
+    <span class="status-dot" id="drive-status">Standby</span>
+  </div>
+  <div class="hud-body">
+    <div class="speed-block">
+      <div class="speed-value" id="speed-value">0</div>
+      <span class="speed-unit">km / h</span>
+    </div>
+    <div class="meter">
+      <div class="meter-top">
+        <span class="label">Battery SOC</span>
+        <span class="num" id="soc-value">100.0 %</span>
+      </div>
+      <div class="bar"><div class="bar-fill" id="soc-bar"></div></div>
+    </div>
+    <div class="meter" style="margin-bottom:0">
+      <div class="meter-top">
+        <span class="label">Est. Range</span>
+        <span class="num" id="range-value">135 km</span>
+      </div>
+      <div class="bar"><div class="bar-fill" id="range-bar"></div></div>
+    </div>
+  </div>
+  <div class="hud-foot">
+    <span>Drive <b id="drive-mode">P</b></span>
+    <span>Doors <b id="door-mode">SHUT</b></span>
+  </div>
+</section>
+
+<div id="legend">
+  <span><span class="key">W</span><span class="key">S</span>Throttle / Brake</span>
+  <span class="sep"></span>
+  <span><span class="key">A</span><span class="key">D</span>Steering</span>
+  <span class="sep"></span>
+  <span>Left-Click + Drag to Rotate</span>
+</div>
+
+<div id="loader">
+  <div class="lbl">Assembling Vehicle</div>
+  <div class="track"><i></i></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  /* =========================================================
+     1. RENDERER / SCENE / CAMERA
+     ========================================================= */
+
+  var container = document.getElementById("viewport");
+
+  var renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: false,
+    powerPreference: "high-performance"
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x030508, 1);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.08;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.physicallyCorrectLights = false;
+  container.appendChild(renderer.domElement);
+
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x030508);
+  scene.fog = new THREE.FogExp2(0x030508, 0.028);
+
+  var camera = new THREE.PerspectiveCamera(
+    38,
+    window.innerWidth / window.innerHeight,
+    0.05,
+    400
+  );
+  camera.position.set(4.6, 2.85, 5.4);
+
+  var controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.062;
+  controls.rotateSpeed = 0.72;
+  controls.panSpeed = 0.6;
+  controls.zoomSpeed = 0.86;
+  controls.minDistance = 1.1;
+  controls.maxDistance = 22;
+  controls.maxPolarAngle = Math.PI * 0.495;
+  controls.minPolarAngle = 0.02;
+  controls.target.set(0, 0.72, 0);
+  controls.autoRotate = false;
+  controls.autoRotateSpeed = 0.85;
+  controls.update();
+
+  /* =========================================================
+     2. LIGHTING RIG
+     ========================================================= */
+
+  var hemi = new THREE.HemisphereLight(0x9fc6e8, 0x0a0f16, 0.52);
+  scene.add(hemi);
+
+  var ambient = new THREE.AmbientLight(0x203040, 0.42);
+  scene.add(ambient);
+
+  var keyLight = new THREE.DirectionalLight(0xe8f4ff, 2.35);
+  keyLight.position.set(5.2, 8.6, 4.4);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.camera.near = 0.5;
+  keyLight.shadow.camera.far = 32;
+  keyLight.shadow.camera.left = -6.5;
+  keyLight.shadow.camera.right = 6.5;
+  keyLight.shadow.camera.top = 6.5;
+  keyLight.shadow.camera.bottom = -6.5;
+  keyLight.shadow.bias = -0.0009;
+  keyLight.shadow.radius = 3.2;
+  scene.add(keyLight);
+
+  var fillLight = new THREE.DirectionalLight(0x6fa8d8, 0.82);
+  fillLight.position.set(-6.4, 3.4, -3.6);
+  scene.add(fillLight);
+
+  var rimLight = new THREE.DirectionalLight(0x4fd1ff, 1.25);
+  rimLight.position.set(-2.4, 1.6, -6.2);
+  scene.add(rimLight);
+
+  var underGlow = new THREE.PointLight(0x2f9fd8, 1.5, 9.5, 2.0);
+  underGlow.position.set(0, -0.55, 0);
+  scene.add(underGlow);
+
+  /* =========================================================
+     3. ENVIRONMENT (procedural reflection map)
+     ========================================================= */
+
+  function buildEnvironmentTexture() {
+    var size = 256;
+    var canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext("2d");
+
+    var grad = ctx.createLinearGradient(0, 0, 0, size);
+    grad.addColorStop(0.0, "#16202c");
+    grad.addColorStop(0.42, "#0c131c");
+    grad.addColorStop(0.52, "#05080d");
+    grad.addColorStop(1.0, "#020407");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    var glow = ctx.createRadialGradient(size * 0.34, size * 0.22, 2, size * 0.34, size * 0.22, size * 0.5);
+    glow.addColorStop(0, "rgba(190, 225, 255, 0.95)");
+    glow.addColorStop(0.45, "rgba(90, 140, 190, 0.34)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, size, size);
+
+    var strip = ctx.createLinearGradient(0, size * 0.30, 0, size * 0.36);
+    strip.addColorStop(0, "rgba(120, 200, 255, 0)");
+    strip.addColorStop(0.5, "rgba(150, 215, 255, 0.75)");
+    strip.addColorStop(1, "rgba(120, 200, 255, 0)");
+    ctx.fillStyle = strip;
+    ctx.fillRect(0, size * 0.30, size, size * 0.06);
+
+    var tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  var envTexture = buildEnvironmentTexture();
+
+  function applyEnvironment() {
+    var pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    var envRT = pmrem.fromEquirectangular(envTexture);
+    scene.environment = envRT.texture;
+    envTexture.dispose();
+    pmrem.dispose();
+  }
+  applyEnvironment();
+
+  /* =========================================================
+     4. MATERIAL LIBRARY
+     ========================================================= */
+
+  var BODY_COLORS = {
+    slate:   { hex: 0x3b4149, rough: 0.52, metal: 0.28 },
+    blue:    { hex: 0x1d4d7a, rough: 0.46, metal: 0.32 },
+    crimson: { hex: 0x7a1f2a, rough: 0.48, metal: 0.30 },
+    amber:   { hex: 0xa86b1c, rough: 0.50, metal: 0.30 },
+    white:   { hex: 0xd7dde3, rough: 0.42, metal: 0.22 }
+  };
+
+  var bodyMaterial = new THREE.MeshPhysicalMaterial({
+    color: BODY_COLORS.slate.hex,
+    roughness: BODY_COLORS.slate.rough,
+    metalness: BODY_COLORS.slate.metal,
+    clearcoat: 0.72,
+    clearcoatRoughness: 0.28,
+    envMapIntensity: 1.15,
+    side: THREE.DoubleSide
+  });
+
+  var bodyAccentMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x1a1e24,
+    roughness: 0.62,
+    metalness: 0.18,
+    clearcoat: 0.4,
+    clearcoatRoughness: 0.5,
+    envMapIntensity: 0.85
+  });
+
+  var steelTubeMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8d97a4,
+    roughness: 0.34,
+    metalness: 0.94,
+    envMapIntensity: 1.2
+  });
+
+  var darkSteelMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2a3038,
+    roughness: 0.44,
+    metalness: 0.86,
+    envMapIntensity: 1.0
+  });
+
+  var chassisMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1d232b,
+    roughness: 0.5,
+    metalness: 0.8,
+    envMapIntensity: 0.9
+  });
+
+  var leatherMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1c1f24,
+    roughness: 0.78,
+    metalness: 0.06,
+    envMapIntensity: 0.55
+  });
+
+  var leatherAccentMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2c3138,
+    roughness: 0.66,
+    metalness: 0.1,
+    envMapIntensity: 0.6
+  });
+
+  var stitchMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6b737e,
+    roughness: 0.8,
+    metalness: 0.15
+  });
+
+  var tireMaterial = new THREE.MeshStandardMaterial({
+    color: 0x14171b,
+    roughness: 0.94,
+    metalness: 0.02,
+    envMapIntensity: 0.35
+  });
+
+  var rimMaterial = new THREE.MeshStandardMaterial({
+    color: 0xa9b4c0,
+    roughness: 0.22,
+    metalness: 1.0,
+    envMapIntensity: 1.5
+  });
+
+  var rimDarkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4a525c,
+    roughness: 0.38,
+    metalness: 0.95,
+    envMapIntensity: 1.1
+  });
+
+  var discMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6f7a86,
+    roughness: 0.34,
+    metalness: 0.98,
+    envMapIntensity: 1.25
+  });
+
+  var caliperMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc4531f,
+    roughness: 0.42,
+    metalness: 0.55,
+    envMapIntensity: 0.95
+  });
+
+  var copperMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb4703c,
+    roughness: 0.3,
+    metalness: 1.0,
+    envMapIntensity: 1.3
+  });
+
+  var hvOrangeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xff6a10,
+    roughness: 0.46,
+    metalness: 0.24,
+    emissive: 0x461603,
+    emissiveIntensity: 0.55,
+    envMapIntensity: 0.8
+  });
+
+  var cellMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2b3a4d,
+    roughness: 0.44,
+    metalness: 0.62,
+    envMapIntensity: 0.95
+  });
+
+  var moduleMaterial = new THREE.MeshStandardMaterial({
+    color: 0x11161d,
+    roughness: 0.6,
+    metalness: 0.5,
+    envMapIntensity: 0.7
+  });
+
+  var motorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x3d454f,
+    roughness: 0.32,
+    metalness: 0.95,
+    envMapIntensity: 1.35
+  });
+
+  var motorHousingMaterial = new THREE.MeshStandardMaterial({
+    color: 0x232a32,
+    roughness: 0.48,
+    metalness: 0.88,
+    envMapIntensity: 1.0
+  });
+
+  var glassMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xdfeef8,
+    roughness: 0.035,
+    metalness: 0.0,
+    transmission: 0.96,
+    thickness: 0.035,
+    ior: 1.52,
+    reflectivity: 0.5,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.03,
+    transparent: true,
+    opacity: 1.0,
+    side: THREE.DoubleSide,
+    envMapIntensity: 1.6
+  });
+
+  var solarCellMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0b1c33,
+    roughness: 0.16,
+    metalness: 0.82,
+    envMapIntensity: 1.45,
+    emissive: 0x04101f,
+    emissiveIntensity: 0.4
+  });
+
+  var solarFrameMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6d7884,
+    roughness: 0.3,
+    metalness: 0.96,
+    envMapIntensity: 1.3
+  });
+
+  var headlightLensMaterial = new THREE.MeshStandardMaterial({
+    color: 0xcfe9ff,
+    roughness: 0.14,
+    metalness: 0.1,
+    emissive: 0x9fd8ff,
+    emissiveIntensity: 0.0,
+    transparent: true,
+    opacity: 0.92
+  });
+
+  var taillightLensMaterial = new THREE.MeshStandardMaterial({
+    color: 0x5a0d12,
+    roughness: 0.2,
+    metalness: 0.16,
+    emissive: 0xff2233,
+    emissiveIntensity: 0.35,
+    transparent: true,
+    opacity: 0.94
+  });
+
+  var screenMaterial = new THREE.MeshStandardMaterial({
+    color: 0x061019,
+    roughness: 0.16,
+    metalness: 0.4,
+    emissive: 0x0d3550,
+    emissiveIntensity: 0.85
+  });
+
+  /* =========================================================
+     5. GROUND / GRID
+     ========================================================= */
+
+  var groundGroup = new THREE.Group();
+  scene.add(groundGroup);
+
+  var floorGeo = new THREE.PlaneGeometry(140, 140, 1, 1);
+  var floorMat = new THREE.MeshStandardMaterial({
+    color: 0x05080c,
+    roughness: 0.42,
+    metalness: 0.35,
+    envMapIntensity: 0.35
+  });
+  var floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.001;
+  floor.receiveShadow = true;
+  groundGroup.add(floor);
+
+  var gridFine = new THREE.GridHelper(140, 280, 0x1b3b52, 0x101c26);
+  gridFine.material.transparent = true;
+  gridFine.material.opacity = 0.34;
+  gridFine.position.y = 0.0;
+  groundGroup.add(gridFine);
+
+  var gridMajor = new THREE.GridHelper(140, 28, 0x2f7396, 0x1a3d52);
+  gridMajor.material.transparent = true;
+  gridMajor.material.opacity = 0.55;
+  gridMajor.position.y = 0.0015;
+  groundGroup.add(gridMajor);
+
+  var padRing = new THREE.Mesh(
+    new THREE.RingGeometry(3.4, 3.46, 128),
+    new THREE.MeshBasicMaterial({
+      color: 0x4fd1ff,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide
+    })
+  );
+  padRing.rotation.x = -Math.PI / 2;
+  padRing.position.y = 0.003;
+  groundGroup.add(padRing);
+
+  /* =========================================================
+     6. GEOMETRY HELPERS
+     ========================================================= */
+
+  function makeTube(length, radius, material, radialSegments) {
+    var geo = new THREE.CylinderGeometry(
+      radius,
+      radius,
+      length,
+      radialSegments || 12,
+      1,
+      false
+    );
+    var mesh = new THREE.Mesh(geo, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function makeBox(w, h, d, material) {
+    var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function makeCylinder(rt, rb, h, seg, material) {
+    var mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(rt, rb, h, seg || 16, 1, false),
+      material
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function makeSphere(r, material, seg) {
+    var mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(r, seg || 18, seg || 18),
+      material
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function makeTorus(r, tube, material, seg, tubeSeg) {
+    var mesh = new THREE.Mesh(
+      new THREE.TorusGeometry(r, tube, tubeSeg || 10, seg || 28),
+      material
+    );
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function makeRoundedBox(w, h, d, radius, material, seg) {
+    var r = Math.min(radius, w / 2 - 0.0005, h / 2 - 0.0005, d / 2 - 0.0005);
+    var shape = new THREE.Shape();
+    var x = -w / 2 + r;
+    var y = -h / 2 + r;
+    var width = w - r * 2;
+    var height = h - r * 2;
+
+    shape.moveTo(x, y - r);
+    shape.lineTo(x + width, y - r);
+    shape.quadraticCurveTo(x + width + r, y - r, x + width + r, y - r + r);
+    shape.lineTo(x + width + r, y + height + r);
+    shape.quadraticCurveTo(x + width + r, y + height + r + r, x + width, y + height + r + r);
+    shape.lineTo(x, y + height + r + r);
+    shape.quadraticCurveTo(x - r, y + height + r + r, x - r, y + height + r);
+    shape.lineTo(x - r, y - r);
+    shape.quadraticCurveTo(x - r, y - r, x, y - r);
+
+    var extrudeSettings = {
+      depth: d,
+      bevelEnabled: true,
+      bevelSegments: seg || 3,
+      bevelSize: r * 0.55,
+      bevelThickness: r * 0.55,
+      curveSegments: seg || 4
+    };
+
+    var geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geo.center();
+    var mesh = new THREE.Mesh(geo, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function tubeBetween(start, end, radius, material, radialSegments) {
+    var dir = new THREE.Vector3().subVectors(end, start);
+    var length = dir.length();
+    var mesh = makeTube(length, radius, material, radialSegments);
+    mesh.position.copy(start).addScaledVector(dir, 0.5);
+    mesh.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      dir.clone().normalize()
+    );
+    return mesh;
+  }
+
+  /* =========================================================
+     7. VEHICLE ROOT & SYSTEM GROUPS
+     ========================================================= */
+
+  var vehicle = new THREE.Group();
+  vehicle.position.set(0, 0, 0);
+  scene.add(vehicle);
+
+  var shellGroup = new THREE.Group();
+  var cageGroup = new THREE.Group();
+  var powertrainGroup = new THREE.Group();
+  var batteryGroup = new THREE.Group();
+  var cabinGroup = new THREE.Group();
+
+  vehicle.add(shellGroup);
+  vehicle.add(cageGroup);
+  vehicle.add(powertrainGroup);
+  vehicle.add(batteryGroup);
+  vehicle.add(cabinGroup);
+
+  var wheelPivots = [];
+  var steeringPivots = [];
+  var doorGroups = [];
+  var headlightSpots = [];
+  var headlightLenses = [];
+  var taillightLenses = [];
+
+  /* Vehicle reference dimensions (metres)
+     length (Z) ~2.70, width (X) ~1.30 */
+  var WHEELBASE = 1.78;
+  var TRACK = 1.06;
+  var WHEEL_RADIUS = 0.245;
+  var WHEEL_WIDTH = 0.155;
+  var AXLE_Z_FRONT = WHEELBASE * 0.5;
+  var AXLE_Z_REAR = -WHEELBASE * 0.5;
+  var FLOOR_Y = 0.30;
+  var ROOF_Y = 1.62;
+  var HALF_W = 0.63;
+
+  /* =========================================================
+     8. TUBULAR SPACEFRAME ROLL CAGE
+     ========================================================= */
+
+  var TUBE_R = 0.019;
+  var TUBE_SEG = 10;
+
+  function buildSpaceframe() {
+    var zFront = 1.22;
+    var zRear = -1.24;
+    var zMid = 0.02;
+    var yLow = 0.28;
+    var yMid = 0.78;
+    var yHigh = 1.30;
+    var yRoof = 1.52;
+    var xOuter = 0.60;
+
+    var nodes = {};
+
+    function node(key, x, y, z) {
+      nodes[key] = new THREE.Vector3(x, y, z);
+    }
+
+    node("fl_l",  xOuter, yLow,  zFront);
+    node("fl_r", -xOuter, yLow,  zFront);
+    node("rl_l",  xOuter, yLow,  zRear);
+    node("rl_r", -xOuter, yLow,  zRear);
+    node("fm_l",  xOuter, yMid,  zFront - 0.06);
+    node("fm_r", -xOuter, yMid,  zFront - 0.06);
+    node("rm_l",  xOuter, yMid,  zRear + 0.06);
+    node("rm_r", -xOuter, yMid,  zRear + 0.06);
+    node("fh_l",  xOuter, yHigh, zFront - 0.16);
+    node("fh_r", -xOuter, yHigh, zFront - 0.16);
+    node("rh_l",  xOuter, yHigh, zRear + 0.10);
+    node("rh_r", -xOuter, yHigh, zRear + 0.10);
+    node("rf_l",  xOuter * 0.92, yRoof, zFront - 0.46);
+    node("rf_r", -xOuter * 0.92, yRoof, zFront - 0.46);
+    node("rr_l",  xOuter * 0.92, yRoof, zRear + 0.34);
+    node("rr_r", -xOuter * 0.92, yRoof, zRear + 0.34);
+    node("mid_l", xOuter, yMid,  zMid);
+    node("mid_r", -xOuter, yMid, zMid);
+    node("cl_f",  0, yLow,  zFront);
+    node("cl_r",  0, yLow,  zRear);
+    node("cl_m",  0, yLow,  zMid);
+    node("ct_m",  0, yRoof, zMid);
+    node("ct_f",  0, yRoof, zFront - 0.42);
+    node("ct_r",  0, yRoof, zRear + 0.30);
+    node("xh_l",  0, yMid,  zFront - 0.06);
+    node("xh_r",  0, yMid,  zRear + 0.06);
+
+    var tubeList = [
+      ["fl_l", "rl_l"], ["fl_r", "rl_r"],
+      ["fl_l", "fl_r"], ["rl_l", "rl_r"],
+      ["cl_f", "cl_r"],
+      ["fl_l", "cl_f"], ["fl_r", "cl_f"],
+      ["rl_l", "cl_r"], ["rl_r", "cl_r"],
+      ["fl_l", "fm_l"], ["fl_r", "fm_r"],
+      ["rl_l", "rm_l"], ["rl_r", "rm_r"],
+      ["fm_l", "fh_l"], ["fm_r", "fh_r"],
+      ["rm_l", "rh_l"], ["rm_r", "rh_r"],
+      ["fm_l", "rm_l"], ["fm_r", "rm_r"],
+      ["fh_l", "rh_l"], ["fh_r", "rh_r"],
+      ["fh_l", "fh_r"],
+      ["fh_l", "rf_l"], ["fh_r", "rf_r"],
+      ["rh_l", "rr_l"], ["rh_r", "rr_r"],
+      ["rf_l", "rr_l"], ["rf_r", "rr_r"],
+      ["rf_l", "rf_r"], ["rr_l", "rr_r"],
+      ["ct_m", "ct_f"], ["ct_m", "ct_r"],
+      ["ct_f", "rf_l"], ["ct_f", "rf_r"],
+      ["ct_r", "rr_l"], ["ct_r", "rr_r"],
+      ["ct_m", "fh_l"], ["ct_m", "fh_r"],
+      ["ct_m", "rh_l"], ["ct_m", "rh_r"],
+      ["mid_l", "mid_r"], ["mid_l", "fm_l"], ["mid_l", "rm_l"],
+      ["mid_r", "fm_r"], ["mid_r", "rm_r"],
+      ["cl_m", "mid_l"], ["cl_m", "mid_r"],
+      ["xh_l", "fm_l"], ["xh_l", "fm_r"],
+      ["xh_r", "rm_l"], ["xh_r", "rm_r"],
+      ["fm_l", "fm_r"], ["rm_l", "rm_r"]
+    ];
+
+    for (var i = 0; i < tubeList.length; i++) {
+      var a = nodes[tubeList[i][0]];
+      var b = nodes[tubeList[i][1]];
+      var tube = tubeBetween(a, b, TUBE_R, steelTubeMaterial, TUBE_SEG);
+      cageGroup.add(tube);
+    }
+
+    var nodeKeys = Object.keys(nodes);
+    for (var n = 0; n < nodeKeys.length; n++) {
+      var p = nodes[nodeKeys[n]];
+      var joint = makeSphere(TUBE_R * 1.28, steelTubeMaterial, 10);
+      joint.position.copy(p);
+      cageGroup.add(joint);
+    }
+
+    var braceList = [
+      ["fl_l", "fm_r"], ["fl_r", "fm_l"],
+      ["rl_l", "rm_r"], ["rl_r", "rm_l"],
+      ["fh_l", "ct_f"], ["fh_r", "ct_f"],
+      ["rh_l", "ct_r"], ["rh_r", "ct_r"]
+    ];
+
+    for (var b2 = 0; b2 < braceList.length; b2++) {
+      var p1 = nodes[braceList[b2][0]];
+      var p2 = nodes[braceList[b2][1]];
+      var brace = tubeBetween(p1, p2, TUBE_R * 0.78, darkSteelMaterial, 8);
+      cageGroup.add(brace);
+    }
+
+    var plate = makeBox(1.28, 0.035, 2.62, chassisMaterial);
+    plate.position.set(0, yLow - 0.028, 0);
+    cageGroup.add(plate);
+
+    var rearBulkhead = makeBox(1.20, 0.62, 0.028, chassisMaterial);
+    rearBulkhead.position.set(0, yLow + 0.34, zRear + 0.30);
+    cageGroup.add(rearBulkhead);
+
+    var frontBulkhead = makeBox(1.20, 0.50, 0.028, chassisMaterial);
+    frontBulkhead.position.set(0, yLow + 0.28, zFront - 0.30);
+    cageGroup.add(frontBulkhead);
+
+    var seatRailLeft = makeBox(0.05, 0.035, 1.30, darkSteelMaterial);
+    seatRailLeft.position.set(0.26, yLow + 0.055, 0.06);
+    cageGroup.add(seatRailLeft);
+
+    var seatRailRight = makeBox(0.05, 0.035, 1.30, darkSteelMaterial);
+    seatRailRight.position.set(-0.26, yLow + 0.055, 0.06);
+    cageGroup.add(seatRailRight);
+
+    var crossBeam = makeBox(1.20, 0.06, 0.06, darkSteelMaterial);
+    crossBeam.position.set(0, yLow + 0.04, zMid);
+    cageGroup.add(crossBeam);
+
+    var rearCross = makeBox(1.20, 0.06, 0.06, darkSteelMaterial);
+    rearCross.position.set(0, yLow + 0.04, zRear + 0.12);
+    cageGroup.add(rearCross);
+
+    var motorMountL = makeBox(0.06, 0.06, 0.34, darkSteelMaterial);
+    motorMountL.position.set(0.34, yLow + 0.04, zRear + 0.34);
+    cageGroup.add(motorMountL);
+
+    var motorMountR = makeBox(0.06, 0.06, 0.34, darkSteelMaterial);
+    motorMountR.position.set(-0.34, yLow + 0.04, zRear + 0.34);
+    cageGroup.add(motorMountR);
+  }
+
+  buildSpaceframe();
+
+  /* =========================================================
+     9. POWERTRAIN: MOTOR, GEARBOX, AXLES, WHEELS
+     ========================================================= */
+
+  function buildWheelAssembly(isRear) {
+    var assembly = new THREE.Group();
+
+    var tire = makeTorus(WHEEL_RADIUS - WHEEL_WIDTH * 0.5, WHEEL_WIDTH * 0.5, tireMaterial, 36, 16);
+    tire.rotation.y = Math.PI / 2;
+    tire.castShadow = true;
+    assembly.add(tire);
+
+    var sidewall = makeCylinder(WHEEL_RADIUS - 0.012, WHEEL_RADIUS - 0.012, WHEEL_WIDTH * 0.86, 34, tireMaterial);
+    sidewall.rotation.z = Math.PI / 2;
+    assembly.add(sidewall);
+
+    var rimBarrel = makeCylinder(WHEEL_RADIUS * 0.62, WHEEL_RADIUS * 0.62, WHEEL_WIDTH * 0.9, 30, rimMaterial);
+    rimBarrel.rotation.z = Math.PI / 2;
+    assembly.add(rimBarrel);
+
+    var rimFace = makeCylinder(WHEEL_RADIUS * 0.66, WHEEL_RADIUS * 0.66, 0.016, 30, rimMaterial);
+    rimFace.rotation.z = Math.PI / 2;
+    rimFace.position.x = WHEEL_WIDTH * 0.44;
+    assembly.add(rimFace);
+
+    var spokeCount = 5;
+    for (var s = 0; s < spokeCount; s++) {
+      var angle = (s / spokeCount) * Math.PI * 2;
+      var spoke = makeBox(0.026, WHEEL_RADIUS * 1.02, 0.052, rimMaterial);
+      spoke.position.set(WHEEL_WIDTH * 0.44, Math.cos(angle) * WHEEL_RADIUS * 0.30, Math.sin(angle) * WHEEL_RADIUS * 0.30);
+      spoke.rotation.x = angle;
+      assembly.add(spoke);
+    }
+
+    var hubCap = makeCylinder(0.052, 0.058, 0.028, 20, rimDarkMaterial);
+    hubCap.rotation.z = Math.PI / 2;
+    hubCap.position.x = WHEEL_WIDTH * 0.5;
+    assembly.add(hubCap);
+
+    var hubBolt = makeCylinder(0.012, 0.012, 0.04, 8, steelTubeMaterial);
+    hubBolt.rotation.z = Math.PI / 2;
+    hubBolt.position.x = WHEEL_WIDTH * 0.53;
+    assembly.add(hubBolt);
+
+    var disc = makeCylinder(WHEEL_RADIUS * 0.52, WHEEL_RADIUS * 0.52, 0.018, 30, discMaterial);
+    disc.rotation.z = Math.PI / 2;
+    disc.position.x = -WHEEL_WIDTH * 0.12;
+    assembly.add(disc);
+
+    var discInner = makeCylinder(WHEEL_RADIUS * 0.26, WHEEL_RADIUS * 0.26, 0.022, 20, rimDarkMaterial);
+    discInner.rotation.z = Math.PI / 2;
+    discInner.position.x = -WHEEL_WIDTH * 0.12;
+    assembly.add(discInner);
+
+    var caliper = makeBox(0.05, 0.11, 0.075, caliperMaterial);
+    caliper.position.set(-WHEEL_WIDTH * 0.12, WHEEL_RADIUS * 0.40, 0.0);
+    assembly.add(caliper);
+
+    var caliperB = makeBox(0.05, 0.075, 0.05, caliperMaterial);
+    caliperB.position.set(-WHEEL_WIDTH * 0.12, -WHEEL_RADIUS * 0.38, 0.03);
+    assembly.add(caliperB);
+
+    if (isRear) {
+      var halfShaft = makeCylinder(0.026, 0.026, 0.22, 14, darkSteelMaterial);
+      halfShaft.rotation.z = Math.PI / 2;
+      halfShaft.position.x = -WHEEL_WIDTH * 0.55;
+      assembly.add(halfShaft);
+    } else {
+      var hubStub = makeCylinder(0.022, 0.022, 0.16, 14, darkSteelMaterial);
+      hubStub.rotation.z = Math.PI / 2;
+      hubStub.position.x = -WHEEL_WIDTH * 0.5;
+      assembly.add(hubStub);
+    }
+
+    return assembly;
+  }
+
+  function addWheel(x, z, isRear, steerable) {
+    var steerPivot = new THREE.Group();
+    steerPivot.position.set(x, WHEEL_RADIUS, z);
+
+    var spinPivot = new THREE.Group();
+    var wheel = buildWheelAssembly(isRear);
+    if (x < 0) {
+      wheel.rotation.y = Math.PI;
+    }
+    spinPivot.add(wheel);
+    steerPivot.add(spinPivot);
+
+    powertrainGroup.add(steerPivot);
+
+    wheelPivots.push(spinPivot);
+    if (steerable) {
+      steeringPivots.push(steerPivot);
+    }
+    return steerPivot;
+  }
+
+  addWheel(TRACK * 0.5, AXLE_Z_FRONT, false, true);
+  addWheel(-TRACK * 0.5, AXLE_Z_FRONT, false, true);
+  addWheel(TRACK * 0.5, AXLE_Z_REAR, true, false);
+  addWheel(-TRACK * 0.5, AXLE_Z_REAR, true, false);
+
+  function buildDrivetrain() {
+    var motorBody = makeCylinder(0.135, 0.135, 0.30, 26, motorMaterial);
+    motorBody.rotation.z = Math.PI / 2;
+    motorBody.position.set(0, WHEEL_RADIUS + 0.02, AXLE_Z_REAR + 0.10);
+    powertrainGroup.add(motorBody);
+
+    var motorEndCapA = makeCylinder(0.142, 0.142, 0.022, 26, motorHousingMaterial);
+    motorEndCapA.rotation.z = Math.PI / 2;
+    motorEndCapA.position.set(0.155, WHEEL_RADIUS + 0.02, AXLE_Z_REAR + 0.10);
+    powertrainGroup.add(motorEndCapA);
+
+    var motorEndCapB = makeCylinder(0.142, 0.142, 0.022, 26, motorHousingMaterial);
+    motorEndCapB.rotation.z = Math.PI / 2;
+    motorEndCapB.position.set(-0.155, WHEEL_RADIUS + 0.02, AXLE_Z_REAR + 0.10);
+    powertrainGroup.add(motorEndCapB);
+
+    var statorRing = makeTorus(0.128, 0.014, copperMaterial, 30, 8);
+    statorRing.rotation.y = Math.PI / 2;
+    statorRing.position.set(0.09, WHEEL_RADIUS + 0.02, AXLE_Z_REAR + 0.10);
+    powertrainGroup.add(statorRing);
+
+    var statorRing2 = makeTorus(0.128, 0.014, copperMaterial, 30, 8);
+    statorRing2.rotation.y = Math.PI / 2;
+    statorRing2.position.set(-0.09, WHEEL_RADIUS + 0.02, AXLE_Z_REAR + 0.10);
+    powertrainGroup.add(statorRing2);
+
+    for (var f = 0; f < 8; f++) {
+      var ang = (f / 8) * Math.PI * 2;
+      var fin = makeBox(0.008, 0.15, 0.012, motorHousingMaterial);
+      fin.position.set(
+        0,
+        WHEEL_RADIUS + 0.02 + Math.cos(ang) * 0.145,
+        AXLE_Z_REAR + 0.10 + Math.sin(ang) * 0.145
+      );
+      fin.rotation.x = -ang;
+      powertrainGroup.add(fin);
+    }
+
+    var gearbox = makeBox(0.19, 0.20, 0.24, motorHousingMaterial);
+    gearbox.position.set(0, WHEEL_RADIUS + 0.03, AXLE_Z_REAR + 0.30);
+    powertrainGroup.add(gearbox);
+
+    var gearboxRib = makeBox(0.20, 0.028, 0.028, motorMaterial);
+    gearboxRib.position.set(0, WHEEL_RADIUS + 0.10, AXLE_Z_REAR + 0.30);
+    powertrainGroup.add(gearboxRib);
+
+    var gearboxRib2 = makeBox(0.20, 0.028, 0.028, motorMaterial);
+    gearboxRib2.position.set(0, WHEEL_RADIUS - 0.04, AXLE_Z_REAR + 0.30);
+    powertrainGroup.add(gearboxRib2);
+
+    var diffHousing = makeCylinder(0.098, 0.098, 0.16, 22, motorHousingMaterial);
+    diffHousing.rotation.z = Math.PI / 2;
+    diffHousing.position.set(0, WHEEL_RADIUS, AXLE_Z_REAR);
+    powertrainGroup.add(diffHousing);
+
+    var diffBulge = makeSphere(0.075, motorMaterial, 18);
+    diffBulge.scale.set(1.15, 1, 1);
+    diffBulge.position.set(0, WHEEL_RADIUS, AXLE_Z_REAR);
+    powertrainGroup.add(diffBulge);
+
+    var rearAxleL = makeCylinder(0.028, 0.028, TRACK * 0.5 - 0.09, 16, darkSteelMaterial);
+    rearAxleL.rotation.z = Math.PI / 2;
+    rearAxleL.position.set(TRACK * 0.25, WHEEL_RADIUS, AXLE_Z_REAR);
+    powertrainGroup.add(rearAxleL);
+
+    var rearAxleR = makeCylinder(0.028, 0.028, TRACK * 0.5 - 0.09, 16, darkSteelMaterial);
+    rearAxleR.rotation.z = Math.PI / 2;
+    rearAxleR.position.set(-TRACK * 0.25, WHEEL_RADIUS, AXLE_Z_REAR);
+    powertrainGroup.add(rearAxleR);
+
+    var frontAxleBeam = makeCylinder(0.024, 0.024, TRACK - 0.06, 16, darkSteelMaterial);
+    frontAxleBeam.rotation.z = Math.PI / 2;
+    frontAxleBeam.position.set(0, WHEEL_RADIUS, AXLE_Z_FRONT);
+    powertrainGroup.add(frontAxleBeam);
+
+    var suspensionL1 = makeCylinder(0.014, 0.014, 0.30, 12, steelTubeMaterial);
+    suspensionL1.position.set(TRACK * 0.40, WHEEL_RADIUS + 0.13, AXLE_Z_FRONT);
+    suspensionL1.rotation.z = 0.42;
+    powertrainGroup.add(suspensionL1);
+
+    var suspensionR1 = makeCylinder(0.014, 0.014, 0.30, 12, steelTubeMaterial);
+    suspensionR1.position.set(-TRACK * 0.40, WHEEL_RADIUS + 0.13, AXLE_Z_FRONT);
+    suspensionR1.rotation.z = -0.42;
+    powertrainGroup.add(suspensionR1);
+
+    var suspensionL2 = makeCylinder(0.014, 0.014, 0.30, 12, steelTubeMaterial);
+    suspensionL2.position.set(TRACK * 0.40, WHEEL_RADIUS + 0.13, AXLE_Z_REAR);
+    suspensionL2.rotation.z = 0.42;
+    powertrainGroup.add(suspensionL2);
+
+    var suspensionR2 = makeCylinder(0.014, 0.014, 0.30, 12, steelTubeMaterial);
+    suspensionR2.position.set(-TRACK * 0.40, WHEEL_RADIUS + 0.13, AXLE_Z_REAR);
+    suspensionR2.rotation.z = -0.42;
+    powertrainGroup.add(suspensionR2);
+
+    var springL = makeCylinder(0.032, 0.032, 0.20, 14, caliperMaterial);
+    springL.position.set(TRACK * 0.33, WHEEL_RADIUS + 0.20, AXLE_Z_REAR);
+    springL.rotation.z = 0.30;
+    powertrainGroup.add(springL);
+
+    var springR = makeCylinder(0.032, 0.032, 0.20, 14, caliperMaterial);
+    springR.position.set(-TRACK * 0.33, WHEEL_RADIUS + 0.20, AXLE_Z_REAR);
+    springR.rotation.z = -0.30;
+    powertrainGroup.add(springR);
+
+    var cableConduit = makeCylinder(0.016, 0.016, 0.62, 10, hvOrangeMaterial);
+    cableConduit.rotation.x = Math.PI / 2;
+    cableConduit.position.set(0.16, WHEEL_RADIUS + 0.12, AXLE_Z_REAR + 0.46);
+    powertrainGroup.add(cableConduit);
+
+    var cableConduit2 = makeCylinder(0.016, 0.016, 0.62, 10, hvOrangeMaterial);
+    cableConduit2.rotation.x = Math.PI / 2;
+    cableConduit2.position.set(-0.16, WHEEL_RADIUS + 0.12, AXLE_Z_REAR + 0.46);
+    powertrainGroup.add(cableConduit2);
+  }
+
+  buildDrivetrain();
+
+  /* =========================================================
+     10. AIS-156 BATTERY PACK & BMS
+     ========================================================= */
+
+  var batteryCells = [];
+
+  function buildBatteryPack() {
+    var packY = 0.155;
+    var packW = 1.12;
+    var packD = 1.94;
+
+    var tray = makeBox(packW + 0.05, 0.035, packD + 0.05, darkSteelMaterial);
+    tray.position.set(0, packY - 0.075, 0.0);
+    batteryGroup.add(tray);
+
+    var trayLid = makeBox(packW + 0.05, 0.02, packD + 0.05, darkSteelMaterial);
+    trayLid.position.set(0, packY + 0.085, 0.0);
+    batteryGroup.add(trayLid);
+
+    var moduleCols = 2;
+    var moduleRows = 6;
+    var moduleW = 0.50;
+    var moduleD = 0.29;
+    var gapX = 0.06;
+    var gapZ = 0.025;
+
+    var startX = -(moduleW * 0.5 + gapX * 0.5);
+    var startZ = -((moduleRows * (moduleD + gapZ)) * 0.5) + (moduleD + gapZ) * 0.5;
+
+    for (var r = 0; r < moduleRows; r++) {
+      for (var c = 0; c < moduleCols; c++) {
+        var mx = startX + c * (moduleW + gapX);
+        var mz = startZ + r * (moduleD + gapZ);
+
+        var moduleShell = makeBox(moduleW, 0.115, moduleD, moduleMaterial);
+        moduleShell.position.set(mx, packY, mz);
+        batteryGroup.add(moduleShell);
+
+        var cellsPerModule = 4;
+        var cellW = (moduleW - 0.04) / cellsPerModule;
+
+        for (var k = 0; k < cellsPerModule; k++) {
+          var cell = makeCylinder(0.024, 0.024, 0.088, 14, cellMaterial);
+          cell.position.set(
+            mx - moduleW * 0.5 + 0.02 + cellW * 0.5 + k * cellW,
+            packY + 0.012,
+            mz
+          );
+          batteryGroup.add(cell);
+          batteryCells.push(cell);
+
+          var cellTop = makeCylinder(0.019, 0.019, 0.006, 12, copperMaterial);
+          cellTop.position.set(
+            mx - moduleW * 0.5 + 0.02 + cellW * 0.5 + k * cellW,
+            packY + 0.060,
+            mz
+          );
+          batteryGroup.add(cellTop);
+        }
+
+        var busBar = makeBox(moduleW - 0.03, 0.006, 0.022, copperMaterial);
+        busBar.position.set(mx, packY + 0.066, mz);
+        batteryGroup.add(busBar);
+
+        var moduleLabel = makeBox(moduleW - 0.08, 0.002, 0.03, hvOrangeMaterial);
+        moduleLabel.position.set(mx, packY + 0.059, mz + moduleD * 0.32);
+        batteryGroup.add(moduleLabel);
+      }
+    }
+
+    var bmsBox = makeBox(0.20, 0.075, 0.16, motorHousingMaterial);
+    bmsBox.position.set(0.36, packY + 0.115, -0.86);
+    batteryGroup.add(bmsBox);
+
+    var bmsLed = makeBox(0.02, 0.008, 0.02, headlightLensMaterial);
+    bmsLed.position.set(0.36, packY + 0.155, -0.86);
+    bmsLed.material = headlightLensMaterial.clone();
+    bmsLed.material.emissiveIntensity = 0.9;
+    bmsLed.material.emissive = new THREE.Color(0x5ff0a8);
+    batteryGroup.add(bmsLed);
+
+    var contactorL = makeBox(0.07, 0.07, 0.07, darkSteelMaterial);
+    contactorL.position.set(-0.28, packY + 0.10, -0.86);
+    batteryGroup.add(contactorL);
+
+    var contactorR = makeBox(0.07, 0.07, 0.07, darkSteelMaterial);
+    contactorR.position.set(-0.16, packY + 0.10, -0.86);
+    batteryGroup.add(contactorR);
+
+    var hvCableA = makeCylinder(0.014, 0.014, 0.98, 10, hvOrangeMaterial);
+    hvCableA.rotation.x = Math.PI / 2;
+    hvCableA.position.set(0.30, packY + 0.12, 0.14);
+    batteryGroup.add(hvCableA);
+
+    var hvCableB = makeCylinder(0.014, 0.014, 0.98, 10, hvOrangeMaterial);
+    hvCableB.rotation.x = Math.PI / 2;
+    hvCableB.position.set(0.42, packY + 0.12, 0.14);
+    batteryGroup.add(hvCableB);
+
+    var hvElbow = makeCylinder(0.014, 0.014, 0.28, 10, hvOrangeMaterial);
+    hvElbow.rotation.z = Math.PI / 2;
+    hvElbow.position.set(0.24, packY + 0.12, 0.64);
+    batteryGroup.add(hvElbow);
+
+    var fuseBox = makeBox(0.10, 0.06, 0.10, motorHousingMaterial);
+    fuseBox.position.set(0.30, packY + 0.14, 0.58);
+    batteryGroup.add(fuseBox);
+
+    var serviceDisconnect = makeBox(0.09, 0.05, 0.09, hvOrangeMaterial);
+    serviceDisconnect.position.set(-0.36, packY + 0.14, 0.58);
+    batteryGroup.add(serviceDisconnect);
+
+    var packRailL = makeBox(0.03, 0.10, packD, darkSteelMaterial);
+    packRailL.position.set(packW * 0.5 + 0.005, packY, 0);
+    batteryGroup.add(packRailL);
+
+    var packRailR = makeBox(0.03, 0.10, packD, darkSteelMaterial);
+    packRailR.position.set(-packW * 0.5 - 0.005, packY, 0);
+    batteryGroup.add(packRailR);
+  }
+
+  buildBatteryPack();
+
+  /* =========================================================
+     11. CABIN: BUCKET SEATS, REAR BENCH, DASH, STEERING
+     ========================================================= */
+
+  function buildBucketSeat(x) {
+    var seat = new THREE.Group();
+
+    var cushion = makeRoundedBox(0.42, 0.10, 0.46, 0.035, leatherMaterial, 3);
+    cushion.position.set(0, 0.35, 0.02);
+    seat.add(cushion);
+
+    var cushionBolsterL = makeRoundedBox(0.075, 0.085, 0.44, 0.03, leatherAccentMaterial, 3);
+    cushionBolsterL.position.set(0.185, 0.365, 0.02);
+    seat.add(cushionBolsterL);
+
+    var cushionBolsterR = makeRoundedBox(0.075, 0.085, 0.44, 0.03, leatherAccentMaterial, 3);
+    cushionBolsterR.position.set(-0.185, 0.365, 0.02);
+    seat.add(cushionBolsterR);
+
+    var backrest = makeRoundedBox(0.42, 0.62, 0.10, 0.035, leatherMaterial, 3);
+    backrest.position.set(0, 0.68, -0.20);
+    backrest.rotation.x = -0.115;
+    seat.add(backrest);
+
+    var backBolsterL = makeRoundedBox(0.07, 0.56, 0.085, 0.028, leatherAccentMaterial, 3);
+    backBolsterL.position.set(0.183, 0.68, -0.185);
+    backBolsterL.rotation.x = -0.115;
+    seat.add(backBolsterL);
+
+    var backBolsterR = makeRoundedBox(0.07, 0.56, 0.085, 0.028, leatherAccentMaterial, 3);
+    backBolsterR.position.set(-0.183, 0.68, -0.185);
+    backBolsterR.rotation.x = -0.115;
+    seat.add(backBolsterR);
+
+    var headrest = makeRoundedBox(0.20, 0.14, 0.085, 0.028, leatherMaterial, 3);
+    headrest.position.set(0, 1.03, -0.245);
+    headrest.rotation.x = -0.115;
+    seat.add(headrest);
+
+    var headrestPostL = makeCylinder(0.010, 0.010, 0.09, 8, rimDarkMaterial);
+    headrestPostL.position.set(0.065, 0.955, -0.232);
+    seat.add(headrestPostL);
+
+    var headrestPostR = makeCylinder(0.010, 0.010, 0.09, 8, rimDarkMaterial);
+    headrestPostR.position.set(-0.065, 0.955, -0.232);
+    seat.add(headrestPostR);
+
+    var stitchLine = makeBox(0.014, 0.44, 0.002, stitchMaterial);
+    stitchLine.position.set(0, 0.68, -0.252);
+    stitchLine.rotation.x = -0.115;
+    seat.add(stitchLine);
+
+    var seatBase = makeBox(0.34, 0.07, 0.36, darkSteelMaterial);
+    seatBase.position.set(0, 0.28, 0.02);
+    seat.add(seatBase);
+
+    var railL = makeBox(0.035, 0.025, 0.40, rimDarkMaterial);
+    railL.position.set(0.12, 0.245, 0.02);
+    seat.add(railL);
+
+    var railR = makeBox(0.035, 0.025, 0.40, rimDarkMaterial);
+    railR.position.set(-0.12, 0.245, 0.02);
+    seat.add(railR);
+
+    var beltAnchor = makeBox(0.045, 0.045, 0.045, rimDarkMaterial);
+    beltAnchor.position.set(0.205, 0.60, -0.20);
+    seat.add(beltAnchor);
+
+    seat.position.set(x, 0, 0.0);
+    return seat;
+  }
+
+  function buildRearBench() {
+    var bench = new THREE.Group();
+
+    var benchBase = makeRoundedBox(0.94, 0.10, 0.40, 0.035, leatherMaterial, 3);
+    benchBase.position.set(0, 0.355, 0);
+    bench.add(benchBase);
+
+    var benchBack = makeRoundedBox(0.94, 0.44, 0.095, 0.032, leatherMaterial, 3);
+    benchBack.position.set(0, 0.60, -0.19);
+    benchBack.rotation.x = -0.13;
+    bench.add(benchBack);
+
+    var dividerL = makeBox(0.006, 0.36, 0.002, stitchMaterial);
+    dividerL.position.set(0.16, 0.60, -0.238);
+    dividerL.rotation.x = -0.13;
+    bench.add(dividerL);
+
+    var dividerR = makeBox(0.006, 0.36, 0.002, stitchMaterial);
+    dividerR.position.set(-0.16, 0.60, -0.238);
+    dividerR.rotation.x = -0.13;
+    bench.add(dividerR);
+
+    var headrestL = makeRoundedBox(0.16, 0.11, 0.075, 0.024, leatherMaterial, 3);
+    headrestL.position.set(0.24, 0.86, -0.225);
+    headrestL.rotation.x = -0.13;
+    bench.add(headrestL);
+
+    var headrestR = makeRoundedBox(0.16, 0.11, 0.075, 0.024, leatherMaterial, 3);
+    headrestR.position.set(-0.24, 0.86, -0.225);
+    headrestR.rotation.x = -0.13;
+    bench.add(headrestR);
+
+    var benchFrame = makeBox(0.90, 0.07, 0.34, darkSteelMaterial);
+    benchFrame.position.set(0, 0.28, 0);
+    bench.add(benchFrame);
+
+    var hingeL = makeCylinder(0.018, 0.018, 0.10, 12, rimMaterial);
+    hingeL.rotation.z = Math.PI / 2;
+    hingeL.position.set(0.36, 0.32, -0.20);
+    bench.add(hingeL);
+
+    var hingeR = makeCylinder(0.018, 0.018, 0.10, 12, rimMaterial);
+    hingeR.rotation.z = Math.PI / 2;
+    hingeR.position.set(-0.36, 0.32, -0.20);
+    bench.add(hingeR);
+
+    bench.position.set(0, 0, -0.66);
+    return bench;
+  }
+
+  function buildCabin() {
+    var driverSeat = buildBucketSeat(0.27);
+    driverSeat.position.z = 0.20;
+    cabinGroup.add(driverSeat);
+
+    var passengerSeat = buildBucketSeat(-0.27);
+    passengerSeat.position.z = 0.20;
+    cabinGroup.add(passengerSeat);
+
+    var bench = buildRearBench();
+    cabinGroup.add(bench);
+
+    var dashMain = makeRoundedBox(1.16, 0.19, 0.24, 0.04, leatherAccentMaterial, 3);
+    dashMain.position.set(0, 0.90, 0.78);
+    dashMain.rotation.x = -0.20;
+    cabinGroup.add(dashMain);
+
+    var dashTop = makeRoundedBox(1.14, 0.045, 0.20, 0.02, leatherMaterial, 3);
+    dashTop.position.set(0, 0.995, 0.79);
+    dashTop.rotation.x = -0.20;
+    cabinGroup.add(dashTop);
+
+    var clusterHood = makeRoundedBox(0.34, 0.055, 0.16, 0.02, leatherMaterial, 3);
+    clusterHood.position.set(0.27, 0.955, 0.72);
+    clusterHood.rotation.x = -0.22;
+    cabinGroup.add(clusterHood);
+
+    var clusterScreen = makeBox(0.24, 0.075, 0.008, screenMaterial);
+    clusterScreen.position.set(0.27, 0.925, 0.655);
+    clusterScreen.rotation.x = -0.30;
+    cabinGroup.add(clusterScreen);
+
+    var centerScreen = makeBox(0.22, 0.14, 0.010, screenMaterial);
+    centerScreen.position.set(0, 0.905, 0.665);
+    centerScreen.rotation.x = -0.16;
+    cabinGroup.add(centerScreen);
+
+    var centerTrim = makeBox(0.24, 0.16, 0.006, darkSteelMaterial);
+    centerTrim.position.set(0, 0.905, 0.670);
+    centerTrim.rotation.x = -0.16;
+    cabinGroup.add(centerTrim);
+
+    var steeringColumn = makeCylinder(0.022, 0.028, 0.28, 14, darkSteelMaterial);
+    steeringColumn.position.set(0.27, 0.855, 0.70);
+    steeringColumn.rotation.x = 1.02;
+    cabinGroup.add(steeringColumn);
+
+    var steeringWheel = makeTorus(0.155, 0.019, leatherMaterial, 34, 12);
+    steeringWheel.position.set(0.27, 0.905, 0.565);
+    steeringWheel.rotation.x = 0.34;
+    cabinGroup.add(steeringWheel);
+
+    var steeringSpokeA = makeBox(0.15, 0.022, 0.014, rimDarkMaterial);
+    steeringSpokeA.position.set(0.27, 0.905, 0.565);
+    steeringSpokeA.rotation.x = 0.34;
+    cabinGroup.add(steeringSpokeA);
+
+    var steeringSpokeB = makeBox(0.022, 0.14, 0.014, rimDarkMaterial);
+    steeringSpokeB.position.set(0.27, 0.905, 0.565);
+    steeringSpokeB.rotation.x = 0.34;
+    cabinGroup.add(steeringSpokeB);
+
+    var steeringHub = makeCylinder(0.042, 0.042, 0.022, 16, rimDarkMaterial);
+    steeringHub.position.set(0.27, 0.905, 0.565);
+    steeringHub.rotation.x = Math.PI / 2 + 0.34;
+    cabinGroup.add(steeringHub);
+
+    var floorMat = makeBox(1.10, 0.012, 1.86, leatherAccentMaterial);
+    floorMat.position.set(0, 0.315, -0.02);
+    cabinGroup.add(floorMat);
+
+    var pedalBrake = makeBox(0.055, 0.012, 0.085, rimDarkMaterial);
+    pedalBrake.position.set(0.33, 0.50, 0.60);
+    pedalBrake.rotation.x = -0.42;
+    cabinGroup.add(pedalBrake);
+
+    var pedalThrottle = makeBox(0.045, 0.010, 0.075, rimDarkMaterial);
+    pedalThrottle.position.set(0.22, 0.49, 0.61);
+    pedalThrottle.rotation.x = -0.42;
+    cabinGroup.add(pedalThrottle);
+
+    var doorArmrestL = makeRoundedBox(0.07, 0.06, 0.44, 0.02, leatherAccentMaterial, 3);
+    doorArmrestL.position.set(0.575, 0.62, 0.18);
+    cabinGroup.add(doorArmrestL);
+
+    var doorArmrestR = makeRoundedBox(0.07, 0.06, 0.44, 0.02, leatherAccentMaterial, 3);
+    doorArmrestR.position.set(-0.575, 0.62, 0.18);
+    cabinGroup.add(doorArmrestR);
+  }
+
+  buildCabin();
+
+  /* =========================================================
+     12. COMPOSITE SHELL, GLASS, DOORS, SOLAR ROOF
+     ========================================================= */
+
+  function buildShell() {
+    var nose = makeRoundedBox(1.24, 0.34, 0.86, 0.10, bodyMaterial, 4);
+    nose.position.set(0, 0.56, 0.90);
+    nose.rotation.x = -0.06;
+    shellGroup.add(nose);
+
+    var noseTop = makeRoundedBox(1.18, 0.10, 0.50, 0.05, bodyMaterial, 3);
+    noseTop.position.set(0, 0.755, 0.86);
+    noseTop.rotation.x = -0.19;
+    shellGroup.add(noseTop);
+
+    var hood = makeRoundedBox(1.16, 0.055, 0.62, 0.03, bodyAccentMaterial, 3);
+    hood.position.set(0, 0.79, 0.72);
+    hood.rotation.x = -0.145;
+    shellGroup.add(hood);
+
+    var tail = makeRoundedBox(1.22, 0.42, 0.62, 0.09, bodyMaterial, 4);
+    tail.position.set(0, 0.60, -1.02);
+    shellGroup.add(tail);
+
+    var tailTop = makeRoundedBox(1.14, 0.09, 0.40, 0.04, bodyMaterial, 3);
+    tailTop.position.set(0, 0.83, -0.94);
+    shellGroup.add(tailTop);
+
+    var sillL = makeRoundedBox(0.10, 0.24, 1.94, 0.04, bodyMaterial, 3);
+    sillL.position.set(0.615, 0.40, 0.0);
+    shellGroup.add(sillL);
+
+    var sillR = makeRoundedBox(0.10, 0.24, 1.94, 0.04, bodyMaterial, 3);
+    sillR.position.set(-0.615, 0.40, 0.0);
+    shellGroup.add(sillR);
+
+    var roof = makeRoundedBox(1.18, 0.055, 1.42, 0.04, bodyMaterial, 3);
+    roof.position.set(0, 1.575, -0.10);
+    shellGroup.add(roof);
+
+    var roofRear = makeRoundedBox(1.14, 0.045, 0.34, 0.03, bodyMaterial, 3);
+    roofRear.position.set(0, 1.50, -0.84);
+    roofRear.rotation.x = 0.14;
+    shellGroup.add(roofRear);
+
+    var apillarL = makeRoundedBox(0.075, 0.72, 0.09, 0.03, bodyMaterial, 3);
+    apillarL.position.set(0.575, 1.19, 0.60);
+    apillarL.rotation.x = 0.40;
+    shellGroup.add(apillarL);
+
+    var apillarR = makeRoundedBox(0.075, 0.72, 0.09, 0.03, bodyMaterial, 3);
+    apillarR.position.set(-0.575, 1.19, 0.60);
+    apillarR.rotation.x = 0.40;
+    shellGroup.add(apillarR);
+
+    var bpillarL = makeRoundedBox(0.065, 0.70, 0.075, 0.025, bodyMaterial, 3);
+    bpillarL.position.set(0.585, 1.16, -0.30);
+    shellGroup.add(bpillarL);
+
+    var bpillarR = makeRoundedBox(0.065, 0.70, 0.075, 0.025, bodyMaterial, 3);
+    bpillarR.position.set(-0.585, 1.16, -0.30);
+    shellGroup.add(bpillarR);
+
+    var cpillaL = makeRoundedBox(0.070, 0.62, 0.085, 0.028, bodyMaterial, 3);
+    cpillaL.position.set(0.575, 1.14, -0.86);
+    cpillaL.rotation.x = -0.26;
+    shellGroup.add(cpillaL);
+
+    var cpillaR = makeRoundedBox(0.070, 0.62, 0.085, 0.028, bodyMaterial, 3);
+    cpillaR.position.set(-0.575, 1.14, -0.86);
+    cpillaR.rotation.x = -0.26;
+    shellGroup.add(cpillaR);
+
+    var windshield = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 0.68, 1, 1), glassMaterial);
+    windshield.position.set(0, 1.19, 0.62);
+    windshield.rotation.x = -0.72;
+    shellGroup.add(windshield);
+
+    var rearGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.02, 0.52, 1, 1), glassMaterial);
+    rearGlass.position.set(0, 1.18, -0.99);
+    rearGlass.rotation.x = 0.62;
+    shellGroup.add(rearGlass);
+
+    var solarBase = makeBox(1.02, 0.018, 1.14, solarFrameMaterial);
+    solarBase.position.set(0, 1.606, -0.10);
+    shellGroup.add(solarBase);
+
+    var panelCols = 5;
+    var panelRows = 6;
+    var panelW = 0.94 / panelCols;
+    var panelD = 1.06 / panelRows;
+
+    for (var pc = 0; pc < panelCols; pc++) {
+      for (var pr = 0; pr < panelRows; pr++) {
+        var cell = makeBox(panelW * 0.88, 0.008, panelD * 0.86, solarCellMaterial);
+        cell.position.set(
+          -0.47 + panelW * 0.5 + pc * panelW,
+          1.619,
+          -0.63 + panelD * 0.5 + pr * panelD
+        );
+        shellGroup.add(cell);
+      }
+    }
+
+    var bumperFront = makeRoundedBox(1.20, 0.16, 0.14, 0.05, bodyAccentMaterial, 3);
+    bumperFront.position.set(0, 0.44, 1.30);
+    shellGroup.add(bumperFront);
+
+    var bumperRear = makeRoundedBox(1.18, 0.16, 0.13, 0.05, bodyAccentMaterial, 3);
+    bumperRear.position.set(0, 0.44, -1.30);
+    shellGroup.add(bumperRear);
+
+    var diffuser = makeRoundedBox(1.00, 0.055, 0.22, 0.025, bodyAccentMaterial, 3);
+    diffuser.position.set(0, 0.36, -1.28);
+    shellGroup.add(diffuser);
+
+    var grille = makeRoundedBox(0.72, 0.10, 0.04, 0.02, darkSteelMaterial, 3);
+    grille.position.set(0, 0.56, 1.345);
+    shellGroup.add(grille);
+
+    buildHeadlights();
+    buildTaillights();
+    buildDoors();
+
+    var fenderFL = makeRoundedBox(0.14, 0.30, 0.52, 0.05, bodyMaterial, 3);
+    fenderFL.position.set(0.625, 0.56, AXLE_Z_FRONT);
+    shellGroup.add(fenderFL);
+
+    var fenderFR = makeRoundedBox(0.14, 0.30, 0.52, 0.05, bodyMaterial, 3);
+    fenderFR.position.set(-0.625, 0.56, AXLE_Z_FRONT);
+    shellGroup.add(fenderFR);
+
+    var fenderRL = makeRoundedBox(0.14, 0.30, 0.54, 0.05, bodyMaterial, 3);
+    fenderRL.position.set(0.625, 0.56, AXLE_Z_REAR);
+    shellGroup.add(fenderRL);
+
+    var fenderRR = makeRoundedBox(0.14, 0.30, 0.54, 0.05, bodyMaterial, 3);
+    fenderRR.position.set(-0.625, 0.56, AXLE_Z_REAR);
+    shellGroup.add(fenderRR);
+
+    var mirrorL = makeRoundedBox(0.10, 0.055, 0.14, 0.025, bodyAccentMaterial, 3);
+    mirrorL.position.set(0.685, 1.045, 0.50);
+    shellGroup.add(mirrorL);
+
+    var mirrorR = makeRoundedBox(0.10, 0.055, 0.14, 0.025, bodyAccentMaterial, 3);
+    mirrorR.position.set(-0.685, 1.045, 0.50);
+    shellGroup.add(mirrorR);
+
+    var mirrorStalkL = makeCylinder(0.012, 0.012, 0.10, 8, bodyAccentMaterial);
+    mirrorStalkL.position.set(0.635, 1.035, 0.50);
+    mirrorStalkL.rotation.z = Math.PI / 2;
+    shellGroup.add(mirrorStalkL);
+
+    var mirrorStalkR = makeCylinder(0.012, 0.012, 0.10, 8, bodyAccentMaterial);
+    mirrorStalkR.position.set(-0.635, 1.035, 0.50);
+    mirrorStalkR.rotation.z = Math.PI / 2;
+    shellGroup.add(mirrorStalkR);
+
+    var chargePort = makeBox(0.11, 0.11, 0.022, bodyAccentMaterial);
+    chargePort.position.set(0.44, 0.68, 1.335);
+    shellGroup.add(chargePort);
+
+    var chargePortRing = makeTorus(0.052, 0.006, copperMaterial, 22, 8);
+    chargePortRing.position.set(0.44, 0.68, 1.348);
+    shellGroup.add(chargePortRing);
+  }
+
+  function buildHeadlights() {
+    var lensL = makeRoundedBox(0.34, 0.045, 0.05, 0.018, headlightLensMaterial, 3);
+    lensL.position.set(0.36, 0.735, 1.30);
+    lensL.rotation.x = -0.16;
+    shellGroup.add(lensL);
+    headlightLenses.push(lensL);
+
+    var lensR = makeRoundedBox(0.34, 0.045, 0.05, 0.018, headlightLensMaterial, 3);
+    lensR.position.set(-0.36, 0.735, 1.30);
+    lensR.rotation.x = -0.16;
+    shellGroup.add(lensR);
+    headlightLenses.push(lensR);
+
+    var housingL = makeBox(0.38, 0.075, 0.035, darkSteelMaterial);
+    housingL.position.set(0.36, 0.735, 1.272);
+    housingL.rotation.x = -0.16;
+    shellGroup.add(housingL);
+
+    var housingR = makeBox(0.38, 0.075, 0.035, darkSteelMaterial);
+    housingR.position.set(-0.36, 0.735, 1.272);
+    housingR.rotation.x = -0.16;
+    shellGroup.add(housingR);
+
+    var drlL = makeBox(0.30, 0.012, 0.012, headlightLensMaterial);
+    drlL.position.set(0.36, 0.775, 1.288);
+    shellGroup.add(drlL);
+
+    var drlR = makeBox(0.30, 0.012, 0.012, headlightLensMaterial);
+    drlR.position.set(-0.36, 0.775, 1.288);
+    shellGroup.add(drlR);
+
+    for (var i = 0; i < 2; i++) {
+      var spot = new THREE.SpotLight(0xd6ecff, 0.0, 26, Math.PI / 7.2, 0.42, 1.4);
+      spot.position.set(i === 0 ? 0.36 : -0.36, 0.735, 1.30);
+      spot.target.position.set(i === 0 ? 0.9 : -0.9, 0.02, 9.0);
+      spot.castShadow = true;
+      spot.shadow.mapSize.set(1024, 1024);
+      spot.shadow.camera.near = 0.4;
+      spot.shadow.camera.far = 26;
+      spot.shadow.bias = -0.0015;
+      shellGroup.add(spot);
+      shellGroup.add(spot.target);
+      headlightSpots.push(spot);
+    }
+
+    var glowL = new THREE.PointLight(0xbfe4ff, 0.0, 3.2, 2.0);
+    glowL.position.set(0.36, 0.735, 1.34);
+    shellGroup.add(glowL);
+    headlightSpots.push(glowL);
+
+    var glowR = new THREE.PointLight(0xbfe4ff, 0.0, 3.2, 2.0);
+    glowR.position.set(-0.36, 0.735, 1.34);
+    shellGroup.add(glowR);
+    headlightSpots.push(glowR);
+  }
+
+  function buildTaillights() {
+    var bar = makeRoundedBox(0.92, 0.035, 0.03, 0.014, taillightLensMaterial, 3);
+    bar.position.set(0, 0.745, -1.315);
+    shellGroup.add(bar);
+    taillightLenses.push(bar);
+
+    var barLower = makeRoundedBox(0.86, 0.022, 0.026, 0.010, taillightLensMaterial, 3);
+    barLower.position.set(0, 0.700, -1.312);
+    shellGroup.add(barLower);
+    taillightLenses.push(barLower);
+
+    var clusterL = makeRoundedBox(0.13, 0.09, 0.028, 0.02, taillightLensMaterial, 3);
+    clusterL.position.set(0.44, 0.745, -1.312);
+    shellGroup.add(clusterL);
+    taillightLenses.push(clusterL);
+
+    var clusterR = makeRoundedBox(0.13, 0.09, 0.028, 0.02, taillightLensMaterial, 3);
+    clusterR.position.set(-0.44, 0.745, -1.312);
+    shellGroup.add(clusterR);
+    taillightLenses.push(clusterR);
+  }
+
+  function buildDoor(side) {
+    var doorRoot = new THREE.Group();
+    var slideRoot = new THREE.Group();
+    doorRoot.add(slideRoot);
+
+    var glass = new THREE.Mesh(new THREE.PlaneGeometry(0.94, 0.66, 1, 1), glassMaterial);
+    glass.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    glass.position.set(side * 0.605, 1.12, 0.14);
+    slideRoot.add(glass);
+
+    var glassUpper = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.34, 1, 1), glassMaterial);
+    glassUpper.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+    glassUpper.position.set(side * 0.605, 1.32, 0.14);
+    slideRoot.add(glassUpper);
+
+    var railTop = makeBox(0.022, 0.030, 1.02, rimMaterial);
+    railTop.position.set(side * 0.607, 1.465, 0.14);
+    slideRoot.add(railTop);
+
+    var railBottom = makeBox(0.022, 0.030, 1.02, rimMaterial);
+    railBottom.position.set(side * 0.607, 0.780, 0.14);
+    slideRoot.add(railBottom);
+
+    var doorSill = makeRoundedBox(0.045, 0.075, 1.00, 0.018, bodyAccentMaterial, 3);
+    doorSill.position.set(side * 0.615, 0.705, 0.14);
+    slideRoot.add(doorSill);
+
+    var doorTrim = makeBox(0.020, 0.055, 0.98, darkSteelMaterial);
+    doorTrim.position.set(side * 0.600, 1.505, 0.14);
+    slideRoot.add(doorTrim);
+
+    var handle = makeRoundedBox(0.028, 0.045, 0.15, 0.014, rimMaterial, 3);
+    handle.position.set(side * 0.622, 0.88, -0.22);
+    slideRoot.add(handle);
+
+    doorRoot.userData.side = side;
+    doorRoot.userData.slideRoot = slideRoot;
+    doorRoot.userData.baseX = 0;
+    shellGroup.add(doorRoot);
+    doorGroups.push(doorRoot);
+  }
+
+  buildDoor(1);
+  buildDoor(-1);
+
+  buildShell();
+
+  /* =========================================================
+     13. INTERACTION STATE
+     ========================================================= */
+
+  var state = {
+    panelOpen: true,
+    exploded: false,
+    doorsOpen: false,
+    lightsOn: false,
+    xray: false,
+    autoOrbit: false,
+    isolated: null,
+    doorProgress: 0,
+    explodeProgress: 0,
+    xrayProgress: 0,
+    speed: 0,
+    steer: 0,
+    heading: 0,
+    soc: 100,
+    range: 135,
+    maxSpeedKmh: 70,
+    wheelSpin: 0
+  };
+
+  var EXPLODE_TARGETS = {
+    shellGroup: { offset: new THREE.Vector3(0, 0.94, 0), key: "shell" },
+    cageGroup: { offset: new THREE.Vector3(0, 0.30, 0), key: "cage" },
+    powertrainGroup: { offset: new THREE.Vector3(0, -0.42, 0), key: "powertrain" },
+    batteryGroup: { offset: new THREE.Vector3(0, -0.86, 0), key: "battery" },
+    cabinGroup: { offset: new THREE.Vector3(0, 1.58, 0), key: "cabin" }
+  };
+
+  var basePositions = {
+    shellGroup: shellGroup.position.clone(),
+    cageGroup: cageGroup.position.clone(),
+    powertrainGroup: powertrainGroup.position.clone(),
+    batteryGroup: batteryGroup.position.clone(),
+    cabinGroup: cabinGroup.position.clone()
+  };
+
+  /* =========================================================
+     14. UI WIRING
+     ========================================================= */
+
+  var sidebar = document.getElementById("sidebar");
+  var toggleBtn = document.getElementById("panel-toggle");
+  var toggleLabel = document.getElementById("toggle-label");
+
+  toggleBtn.addEventListener("click", function () {
+    state.panelOpen = !state.panelOpen;
+    if (state.panelOpen) {
+      sidebar.classList.remove("collapsed");
+      toggleLabel.textContent = "Toggle UI Panel";
+    } else {
+      sidebar.classList.add("collapsed");
+      toggleLabel.textContent = "Show UI Panel";
+    }
+  });
+
+  function setToggleTag(btn, on) {
+    if (!btn) return;
+    if (on) {
+      btn.classList.add("is-on");
+      btn.classList.remove("is-off");
+    } else {
+      btn.classList.remove("is-on");
+      btn.classList.add("is-off");
+    }
+  }
+
+  /* --- Sub-system isolation --- */
+  var isolateButtons = document.querySelectorAll("[data-isolate]");
+
+  function applyIsolation(key) {
+    state.isolated = key;
+
+    for (var i = 0; i < isolateButtons.length; i++) {
+      var b = isolateButtons[i];
+      setToggleTag(b, b.getAttribute("data-isolate") === key);
+    }
+
+    if (key === "assembly") {
+      shellGroup.visible = true;
+      cageGroup.visible = true;
+      powertrainGroup.visible = true;
+      batteryGroup.visible = true;
+      cabinGroup.visible = true;
+    } else if (key === "cage") {
+      shellGroup.visible = false;
+      cageGroup.visible = true;
+      powertrainGroup.visible = true;
+      batteryGroup.visible = false;
+      cabinGroup.visible = false;
+    } else if (key === "powertrain") {
+      shellGroup.visible = false;
+      cageGroup.visible = false;
+      powertrainGroup.visible = true;
+      batteryGroup.visible = false;
+      cabinGroup.visible = false;
+    } else if (key === "battery") {
+      shellGroup.visible = false;
+      cageGroup.visible = false;
+      powertrainGroup.visible = false;
+      batteryGroup.visible = true;
+      cabinGroup.visible = false;
+    } else if (key === "cabin") {
+      shellGroup.visible = false;
+      cageGroup.visible = false;
+      powertrainGroup.visible = false;
+      batteryGroup.visible = false;
+      cabinGroup.visible = true;
+    } else if (key === "shell") {
+      shellGroup.visible = true;
+      cageGroup.visible = false;
+      powertrainGroup.visible = false;
+      batteryGroup.visible = false;
+      cabinGroup.visible = false;
+    }
+  }
+
+  for (var ib = 0; ib < isolateButtons.length; ib++) {
+    (function (btn) {
+      btn.addEventListener("click", function () {
+        applyIsolation(btn.getAttribute("data-isolate"));
+      });
+    })(isolateButtons[ib]);
+  }
+
+  setToggleTag(document.querySelector('[data-isolate="assembly"]'), true);
+
+  /* --- Explode --- */
+  var explodeBtn = document.getElementById("btn-explode");
+  var explodeTag = document.getElementById("tag-explode");
+
+  explodeBtn.addEventListener("click", function () {
+    state.exploded = !state.exploded;
+    explodeTag.textContent = state.exploded ? "On" : "Off";
+    setToggleTag(explodeBtn, state.exploded);
+  });
+
+  /* --- Doors --- */
+  var doorsBtn = document.getElementById("btn-doors");
+  var doorsTag = document.getElementById("tag-doors");
+  var doorModeLabel = document.getElementById("door-mode");
+
+  doorsBtn.addEventListener("click", function () {
+    state.doorsOpen = !state.doorsOpen;
+    doorsTag.textContent = state.doorsOpen ? "Open" : "Closed";
+    doorModeLabel.textContent = state.doorsOpen ? "OPEN" : "SHUT";
+    setToggleTag(doorsBtn, state.doorsOpen);
+  });
+
+  /* --- Headlights --- */
+  var lightsBtn = document.getElementById("btn-lights");
+  var lightsTag = document.getElementById("tag-lights");
+
+  lightsBtn.addEventListener("click", function () {
+    state.lightsOn = !state.lightsOn;
+    lightsTag.textContent = state.lightsOn ? "On" : "Off";
+    setToggleTag(lightsBtn, state.lightsOn);
+  });
+
+  /* --- X-Ray --- */
+  var xrayBtn = document.getElementById("btn-xray");
+  var xrayTag = document.getElementById("tag-xray");
+
+  xrayBtn.addEventListener("click", function () {
+    state.xray = !state.xray;
+    xrayTag.textContent = state.xray ? "On" : "Off";
+    setToggleTag(xrayBtn, state.xray);
+  });
+
+  /* --- Auto orbit --- */
+  var orbitBtn = document.getElementById("btn-orbit");
+  var orbitTag = document.getElementById("tag-orbit");
+
+  orbitBtn.addEventListener("click", function () {
+    state.autoOrbit = !state.autoOrbit;
+    controls.autoRotate = state.autoOrbit;
+    orbitTag.textContent = state.autoOrbit ? "On" : "Off";
+    setToggleTag(orbitBtn, state.autoOrbit);
+  });
+
+  /* --- Reset view --- */
+  var resetBtn = document.getElementById("btn-reset");
+  var camTween = null;
+
+  function tweenCamera(targetPos, targetLook, duration) {
+    camTween = {
+      from: camera.position.clone(),
+      to: targetPos.clone(),
+      fromTarget: controls.target.clone(),
+      toTarget: targetLook.clone(),
+      start: performance.now(),
+      duration: duration || 950
+    };
+  }
+
+  resetBtn.addEventListener("click", function () {
+    tweenCamera(new THREE.Vector3(4.6, 2.85, 5.4), new THREE.Vector3(0, 0.72, 0), 950);
+  });
+
+  /* --- Camera presets --- */
+  var camButtons = document.querySelectorAll("[data-cam]");
+
+  for (var cb = 0; cb < camButtons.length; cb++) {
+    (function (btn) {
+      btn.addEventListener("click", function () {
+        var preset = btn.getAttribute("data-cam");
+        if (preset === "driver") {
+          tweenCamera(new THREE.Vector3(0.27, 1.22, 0.62), new THREE.Vector3(0.0, 1.02, 2.4), 900);
+        } else if (preset === "top") {
+          tweenCamera(new THREE.Vector3(0.0, 6.2, 0.02), new THREE.Vector3(0, 0.6, 0), 900);
+        } else if (preset === "chassis") {
+          tweenCamera(new THREE.Vector3(2.35, -0.95, 2.05), new THREE.Vector3(0, 0.20, 0), 900);
+        }
+      });
+    })(camButtons[cb]);
+  }
+
+  /* --- Body color swatches --- */
+  var swatches = document.querySelectorAll(".swatch");
+
+  function applyBodyColor(name) {
+    var cfg = BODY_COLORS[name];
+    if (!cfg) return;
+    bodyMaterial.color.setHex(cfg.hex);
+    bodyMaterial.roughness = cfg.rough;
+    bodyMaterial.metalness = cfg.metal;
+    bodyMaterial.needsUpdate = true;
+  }
+
+  for (var sw = 0; sw < swatches.length; sw++) {
+    (function (btn) {
+      btn.addEventListener("click", function () {
+        for (var s2 = 0; s2 < swatches.length; s2++) {
+          swatches[s2].classList.remove("active");
+        }
+        btn.classList.add("active");
+        applyBodyColor(btn.getAttribute("data-color"));
+      });
+    })(swatches[sw]);
+  }
+
+  /* =========================================================
+     15. KEYBOARD DRIVE INPUT
+     ========================================================= */
+
+  var keys = Object.create(null);
+
+  window.addEventListener("keydown", function (e) {
+    var k = e.key.toLowerCase();
+    if (k === "w" || k === "a" || k === "s" || k === "d" ||
+        k === "arrowup" || k === "arrowdown" || k === "arrowleft" || k === "arrowright") {
+      keys[k] = true;
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener("keyup", function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = false;
+  });
+
+  window.addEventListener("blur", function () {
+    keys = Object.create(null);
+  });
+
+  /* =========================================================
+     16. ANIMATION LOOP
+     ========================================================= */
+
+  var speedEl = document.getElementById("speed-value");
+  var socEl = document.getElementById("soc-value");
+  var rangeEl = document.getElementById("range-value");
+  var socBar = document.getElementById("soc-bar");
+  var rangeBar = document.getElementById("range-bar");
+  var driveStatus = document.getElementById("drive-status");
+  var driveMode = document.getElementById("drive-mode");
+
+  var clock = new THREE.Clock();
+  var lastHudUpdate = 0;
+  var displayedSpeed = 0;
+
+  var BASE_RANGE_KM = 135;
+  var BATTERY_KWH = 8.6;
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    var delta = Math.min(clock.getDelta(), 0.05);
+
+    /* --- Camera tween --- */
+    if (camTween) {
+      var t = clamp((performance.now() - camTween.start) / camTween.duration, 0, 1);
+      var eased = 1 - Math.pow(1 - t, 3);
+      camera.position.lerpVectors(camTween.from, camTween.to, eased);
+      controls.target.lerpVectors(camTween.fromTarget, camTween.toTarget, eased);
+      if (t >= 1) camTween = null;
+    }
+
+    /* --- Explode lerp --- */
+    var explodeTarget = state.exploded ? 1 : 0;
+    state.explodeProgress = lerp(state.explodeProgress, explodeTarget, 1 - Math.pow(0.0022, delta));
+
+    var groupMap = [
+      ["shellGroup", shellGroup],
+      ["cageGroup", cageGroup],
+      ["powertrainGroup", powertrainGroup],
+      ["batteryGroup", batteryGroup],
+      ["cabinGroup", cabinGroup]
+    ];
+
+    for (var g = 0; g < groupMap.length; g++) {
+      var key = groupMap[g][0];
+      var grp = groupMap[g][1];
+      var base = basePositions[key];
+      var off = EXPLODE_TARGETS[key].offset;
+      var p = state.explodeProgress;
+
+      grp.position.set(
+        base.x + off.x * p,
+        base.y + off.y * p,
+        base.z + off.z * p
+      );
+    }
+
+    /* --- Doors lerp --- */
+    var doorTarget = state.doorsOpen ? 1 : 0;
+    state.doorProgress = lerp(state.doorProgress, doorTarget, 1 - Math.pow(0.0015, delta));
+
+    for (var d = 0; d < doorGroups.length; d++) {
+      var dg = doorGroups[d];
+      var slide = dg.userData.slideRoot;
+      var side = dg.userData.side;
+      slide.position.x = side * 0.90 * state.doorProgress;
+      slide.position.z = -0.86 * state.doorProgress;
+    }
+
+    /* --- X-Ray lerp --- */
+    var xrayTarget = state.xray ? 1 : 0;
+    state.xrayProgress = lerp(state.xrayProgress, xrayTarget, 1 - Math.pow(0.0025, delta));
+
+    var xp = state.xrayProgress;
+    bodyMaterial.transparent = xp > 0.01;
+    bodyMaterial.opacity = 1 - xp * 0.76;
+    bodyAccentMaterial.transparent = xp > 0.01;
+    bodyAccentMaterial.opacity = 1 - xp * 0.76;
+    steelTubeMaterial.wireframe = xp > 0.5;
+    darkSteelMaterial.wireframe = xp > 0.5;
+    chassisMaterial.wireframe = xp > 0.5;
+    steelTubeMaterial.opacity = 1 - xp * 0.2;
+    steelTubeMaterial.transparent = xp > 0.01;
+    glassMaterial.opacity = 1 - xp * 0.55;
+
+    /* --- Headlights --- */
+    var lightFactor = state.lightsOn ? 1 : 0;
+
+    for (var hl = 0; hl < headlightSpots.length; hl++) {
+      var light = headlightSpots[hl];
+      var targetIntensity = 0;
+      if (light.isSpotLight) {
+        targetIntensity = lightFactor * 4.6;
+      } else {
+        targetIntensity = lightFactor * 1.25;
+      }
+      light.intensity = lerp(light.intensity, targetIntensity, 1 - Math.pow(0.0008, delta));
+    }
+
+    for (var ll = 0; ll < headlightLenses.length; ll++) {
+      var lm = headlightLenses[ll].material;
+      lm.emissiveIntensity = lerp(lm.emissiveIntensity, lightFactor * 3.4, 1 - Math.pow(0.002, delta));
+    }
+
+    for (var tl = 0; tl < taillightLenses.length; tl++) {
+      var tm = taillightLenses[tl].material;
+      var tailTarget = 0.35 + lightFactor * 2.4;
+      tm.emissiveIntensity = lerp(tm.emissiveIntensity, tailTarget, 1 - Math.pow(0.004, delta));
+    }
+
+    /* --- Drive physics --- */
+    var throttle = (keys["w"] || keys["arrowup"]) ? 1 : 0;
+    var brake = (keys["s"] || keys["arrowdown"]) ? 1 : 0;
+    var steerLeft = (keys["a"] || keys["arrowleft"]) ? 1 : 0;
+    var steerRight = (keys["d"] || keys["arrowright"]) ? 1 : 0;
+
+    var maxSpeedMs = state.maxSpeedKmh / 3.6;
+    var accel = 3.05;
+    var brakeDecel = 4.85;
+    var drag = 1.35;
+
+    if (throttle > 0 && state.soc > 0) {
+      state.speed += accel * delta;
+    } else if (brake > 0) {
+      state.speed -= brakeDecel * delta;
+    } else {
+      state.speed -= drag * delta * (0.6 + state.speed * 0.14);
+    }
+
+    state.speed = clamp(state.speed, 0, maxSpeedMs);
+
+    var steerInput = steerRight - steerLeft;
+    var steerMax = 0.46;
+    var steerTarget = steerInput * steerMax * (1 - clamp(state.speed / maxSpeedMs, 0, 1) * 0.55);
+    state.steer = lerp(state.steer, steerTarget, 1 - Math.pow(0.004, delta));
+
+    if (Math.abs(state.speed) > 0.001) {
+      var turnRate = (state.speed / (WHEELBASE * 0.5)) * Math.tan(state.steer) * 0.34;
+      state.heading += turnRate * delta;
+      vehicle.rotation.y = state.heading;
+
+      vehicle.position.x -= Math.sin(state.heading) * state.speed * delta;
+      vehicle.position.z -= Math.cos(state.heading) * state.speed * delta;
+    }
+
+    /* --- Wheel animation --- */
+    var spinDelta = (state.speed / WHEEL_RADIUS) * delta;
+    state.wheelSpin += spinDelta;
+
+    for (var wp = 0; wp < wheelPivots.length; wp++) {
+      wheelPivots[wp].rotation.x = -state.wheelSpin;
+    }
+
+    for (var sp = 0; sp < steeringPivots.length; sp++) {
+      steeringPivots[sp].rotation.y = state.steer;
+    }
+
+    /* --- Battery drain --- */
+    var kmh = state.speed * 3.6;
+    var drainPerSecond = 0;
+
+    if (kmh > 0.4) {
+      drainPerSecond += (kmh / state.maxSpeedKmh) * 0.028;
+    }
+    if (state.lightsOn) {
+      drainPerSecond += 0.0055;
+    }
+
+    if (drainPerSecond > 0 && state.soc > 0) {
+      state.soc = clamp(state.soc - drainPerSecond * delta, 0, 100);
+    }
+
+    state.range = (state.soc / 100) * BASE_RANGE_KM;
+
+    /* --- HUD --- */
+    displayedSpeed = lerp(displayedSpeed, kmh, 1 - Math.pow(0.0009, delta));
+
+    var now = performance.now();
+    if (now - lastHudUpdate > 70) {
+      lastHudUpdate = now;
+
+      speedEl.textContent = Math.round(displayedSpeed).toString();
+      socEl.textContent = state.soc.toFixed(1) + " %";
+      rangeEl.textContent = state.range.toFixed(0) + " km";
+
+      socBar.style.width = clamp(state.soc, 0, 100) + "%";
+      rangeBar.style.width = clamp((state.range / BASE_RANGE_KM) * 100, 0, 100) + "%";
+
+      socBar.classList.remove("warn", "low");
+      if (state.soc < 15) {
+        socBar.classList.add("low");
+      } else if (state.soc < 35) {
+        socBar.classList.add("warn");
+      }
+
+      if (kmh > 1.0) {
+        driveStatus.textContent = "Driving";
+        driveMode.textContent = "D";
+      } else {
+        driveStatus.textContent = "Standby";
+        driveMode.textContent = "P";
+      }
+    }
+
+    /* --- Subtle ambient motion --- */
+    var t2 = now * 0.001;
+    padRing.material.opacity = 0.16 + Math.sin(t2 * 0.9) * 0.06;
+    underGlow.intensity = 1.35 + Math.sin(t2 * 1.4) * 0.16;
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  /* =========================================================
+     17. RESIZE + BOOT
+     ========================================================= */
+
+  window.addEventListener("resize", function () {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  });
+
+  applyIsolation("assembly");
+  setToggleTag(explodeBtn, false);
+  setToggleTag(doorsBtn, false);
+  setToggleTag(lightsBtn, false);
+  setToggleTag(xrayBtn, false);
+  setToggleTag(orbitBtn, false);
+
+  animate();
+
+  window.setTimeout(function () {
+    var loader = document.getElementById("loader");
+    if (loader) {
+      loader.classList.add("hidden");
+      window.setTimeout(function () {
+        loader.style.display = "none";
+      }, 760);
+    }
+  }, 620);
+
+})();
+</script>
+</body>
+</html>
